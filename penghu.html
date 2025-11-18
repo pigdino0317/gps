@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <title>ThingSpeak GPS 軌跡地圖（台灣時間 + 可縮放）</title>
+
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+    }
+    #map {
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <!-- Leaflet JS -->
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <script>
+    // ======= 設定區 =======
+    const channelId  = 3079326;   // ← 換成你的 ThingSpeak Channel ID
+    const results    = 500;       // 要抓幾筆 GPS 資料
+    const readApiKey = "";        // 私有頻道才需要填 Read API Key（公開留空）
+
+    // ThingSpeak API URL（location=true 才能讀到 latitude / longitude）
+    let url = `https://api.thingspeak.com/channels/${channelId}/feeds.json?results=${results}&location=true`;
+    if (readApiKey) url += `&api_key=${readApiKey}`;
+
+    // ======= 初始化地圖 =======
+    const map = L.map("map").setView([23.7, 121], 7);  // 台灣位置
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors"
+    }).addTo(map);
+
+    // ======= 從 ThingSpeak 讀取資料 =======
+    fetch(url)
+      .then(res => res.json())
+      .then(data => {
+        if (!data.feeds || data.feeds.length === 0) {
+          alert("沒有資料，請確認 Channel 是否有經緯度");
+          return;
+        }
+
+        const points = [];
+
+        data.feeds.forEach(feed => {
+          const lat = parseFloat(feed.latitude);
+          const lon = parseFloat(feed.longitude);
+
+          if (!isNaN(lat) && !isNaN(lon)) {
+
+            // === UTC → 台灣時間（UTC+8） ===
+            const utc = new Date(feed.created_at);
+            const taiwan = new Date(utc.getTime() + 8 * 60 * 60 * 1000);
+            const timeStr = taiwan.toISOString().replace("T", " ").substring(0, 19);
+
+            points.push({
+              lat: lat,
+              lon: lon,
+              time: timeStr      // 已經是台灣時間 YYYY-MM-DD HH:mm:ss
+            });
+          }
+        });
+
+        if (points.length === 0) {
+          alert("沒有有效的經緯度資料");
+          return;
+        }
+
+        const latlngs = points.map(p => [p.lat, p.lon]);
+
+        // ======= 畫軌跡線 =======
+        const polyline = L.polyline(latlngs, { color: "blue", weight: 4 }).addTo(map);
+
+        // 自動縮放至最佳視角
+        map.fitBounds(polyline.getBounds());
+
+        // ======= 起點（綠） =======
+        const start = points[0];
+        L.marker([start.lat, start.lon], { title: "起點" })
+          .addTo(map)
+          .bindPopup(`<b>起點</b><br>時間：${start.time}`);
+
+        // ======= 終點（紅） =======
+        const end = points[points.length - 1];
+        L.marker([end.lat, end.lon], { title: "終點" })
+          .addTo(map)
+          .bindPopup(`<b>終點</b><br>時間：${end.time}`);
+
+        // ======= 每個點也可顯示時間 =======
+        points.forEach((p, idx) => {
+          L.circleMarker([p.lat, p.lon], {
+            radius: 3,
+            color: "#0078ff",
+            fillOpacity: 0.8
+          }).addTo(map)
+            .bindPopup(`第 ${idx + 1} 筆<br>時間：${p.time}`);
+        });
+
+      })
+      .catch(err => {
+        console.error(err);
+        alert("讀取 ThingSpeak 發生錯誤，請查看 Console");
+      });
+  </script>
+</body>
+</html>
+
+
